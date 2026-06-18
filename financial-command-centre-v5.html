@@ -2011,6 +2011,12 @@ function buildCurrencyHeader(tripId){
   +'</div>';
 }
 
+// Global helper — called from dashboard AND travel tab
+function openAddTripCost(tripId){
+  const trip=trips.find(t=>t.id===tripId);
+  if(trip)openSheet('add-trip-cost',{tripId:trip.id,tripName:trip.name});
+}
+
 async function renderTravel(){
   const el=document.getElementById('view-travel');
   const today=todayStr();
@@ -2045,10 +2051,6 @@ async function renderTravel(){
     },[]);
   }
 
-  function openAddTripCost(tripId){
-    const trip=trips.find(t=>t.id===tripId);
-    if(trip)openSheet('add-trip-cost',{tripId:trip.id,tripName:trip.name});
-  }
   function buildActiveTripCostBlock(trip){
     const costs=tripCosts.filter(c=>c.tripId===trip.id);
     if(costs.length===0&&!trip.budget)return'';
@@ -3413,35 +3415,7 @@ function importBackup(){
 
 // ===== BOOT =====
 document.addEventListener('DOMContentLoaded',init);
-if('serviceWorker' in navigator){
-  const swCode=`
-    const CACHE='fincommand-v2';
-    const START='/Fincommand-pwa/financial-command-centre-v5.html';
-    self.addEventListener('install',e=>{
-      e.waitUntil(caches.open(CACHE).then(c=>c.add(START)).catch(()=>{}));
-      self.skipWaiting();
-    });
-    self.addEventListener('activate',e=>{
-      e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
-      self.clients.claim();
-    });
-    self.addEventListener('fetch',e=>{
-      e.respondWith(caches.match(e.request).then(r=>{
-        if(r)return r;
-        return fetch(e.request).then(res=>{
-          if(res&&res.status===200){
-            const clone=res.clone();
-            caches.open(CACHE).then(c=>c.put(e.request,clone));
-          }
-          return res;
-        }).catch(()=>caches.match(START));
-      }));
-    });
-  `;
-  const blob=new Blob([swCode],{type:'application/javascript'});
-  const swUrl=URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl,{scope:'/Fincommand-pwa/'}).catch(e=>console.log('SW:',e));
-}
+// Service worker not used — app is offline-capable via IndexedDB
 </script>
 </body>
 </html>
