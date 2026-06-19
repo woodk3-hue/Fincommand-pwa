@@ -273,8 +273,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 
 <script>
 // ===== DB =====
-const DB_NAME='FinCmdDB8',DB_VER=8;
-const ST={ACC:'accounts',TX:'transactions',BILLS:'bills',SF:'sinkingFunds',PAY:'paydayTemplates',PROP:'properties',WISE:'wise',LOANS:'loans',INCOME:'income',PAYS:'payRecords',RENTS:'rentRecords',PERIODS:'payPeriods',SNAPS:'snapshots',BILLPAY:'billPayments',TRIPS:'trips',WISEEX:'wiseExchanges',WISESP:'wiseSpend',RATES:'interestRates',INSTAL:'instalments',DASHCFG:'dashConfig',CASH:'cashInHand',SETTLEMENTS:'settlements',ATMDRAW:'atmWithdrawals',TRIPCOSTS:'tripCosts'};
+const DB_NAME='FinCmdDB9',DB_VER=9;
+const ST={ACC:'accounts',TX:'transactions',BILLS:'bills',SF:'sinkingFunds',PAY:'paydayTemplates',PROP:'properties',WISE:'wise',LOANS:'loans',INCOME:'income',PAYS:'payRecords',RENTS:'rentRecords',PERIODS:'payPeriods',SNAPS:'snapshots',BILLPAY:'billPayments',TRIPS:'trips',WISEEX:'wiseExchanges',WISESP:'wiseSpend',RATES:'interestRates',INSTAL:'instalments',DASHCFG:'dashConfig',CASH:'cashInHand',SETTLEMENTS:'settlements',ATMDRAW:'atmWithdrawals',TRIPCOSTS:'tripCosts',INCSTREAMS:'incomeStreams',INCPAY:'incomePayments'};
 let _db=null;
 function openDB(){
   return new Promise((res,rej)=>{
@@ -374,6 +374,12 @@ async function seedData(){
   for(const b of bills)await dbPut(ST.BILLS,b);
   const loans=[{name:'Caravan Loan',balance:43919.15,repayment:372.48,freq:'fortnightly',nextPayment:'2026-06-19',endDate:'2032-11-03',paidFrom:'Big Save'}];
   for(const l of loans)await dbPut(ST.LOANS,l);
+  // Income streams
+  const incStreamsSeed=[
+    {name:'Car Park Rental',amount:50,freq:'weekly',depositTo:'Bowen Hills Transaction',enabled:true,notes:'Weekly car park rent'}
+  ];
+  const existingIS=await dbAll(ST.INCSTREAMS);
+  if(existingIS.length===0)for(const s of incStreamsSeed)await dbPut(ST.INCSTREAMS,s);
   const sf=[
     {name:'Griffin Rates',target:2405.60,current:0,freq:'quarterly',annualCost:2405.60,property:'Griffin'},
     {name:'Griffin Water',target:1292.32,current:0,freq:'quarterly',annualCost:1292.32,property:'Griffin'},
@@ -397,7 +403,7 @@ async function seedData(){
 let tab='dashboard',fabOpen=false,dashEditMode=false;
 let accs=[],txs=[],bills=[],sfs=[],props=[],wise=[],payT=[],loans=[],pays=[],rents=[],periods=[],snaps=[],billPayHistory=[],trips=[],wiseEx=[],wiseSp=[],rates=[],instalments=[],dashCfg={cards:[]};
 let txFilter='all';
-let cashInHand=[],settlements=[],atmDrawals=[],tripCosts=[];
+let cashInHand=[],settlements=[],atmDrawals=[],tripCosts=[],incStreams=[],incPayments=[];
 let activeTripId=null;
 
 // ===== UTILS =====
@@ -459,9 +465,27 @@ async function checkDueBills(){
 
 // ===== INIT =====
 async function init(){
-  await openDB();await seedData();await loadAll();
-  await checkDueBills();
-  renderNav();renderFAB();await switchTab('dashboard');
+  try{
+    console.log('[init] opening DB...');
+    await openDB();
+    console.log('[init] DB open ✓, seeding...');
+    await seedData();
+    console.log('[init] seed ✓, loading data...');
+    await loadAll();
+    console.log('[init] data loaded ✓, checking bills...');
+    await checkDueBills();
+    console.log('[init] bills checked ✓, rendering...');
+    renderNav();renderFAB();await switchTab('dashboard');
+    console.log('[init] complete ✓');
+  }catch(err){
+    console.error('[init] FAILED:',err);
+    document.getElementById('view-dashboard').innerHTML=
+      '<div style="padding:30px;text-align:center;color:#EF4444">'
+      +'<div style="font-size:1.2rem;margin-bottom:10px">⚠ Failed to load</div>'
+      +'<div style="font-size:0.85rem;color:#7A8BA6;font-family:monospace;white-space:pre-wrap;text-align:left;background:#111827;padding:14px;border-radius:10px;margin-top:14px">'
+      +(err?.stack||err?.message||String(err))
+      +'</div></div>';
+  }
 }
 async function loadAll(){
   accs=await dbAll(ST.ACC);txs=await dbAll(ST.TX);bills=await dbAll(ST.BILLS);sfs=await dbAll(ST.SF);
@@ -469,7 +493,7 @@ async function loadAll(){
   pays=await dbAll(ST.PAYS);rents=await dbAll(ST.RENTS);periods=await dbAll(ST.PERIODS);snaps=await dbAll(ST.SNAPS);
   billPayHistory=await dbAll(ST.BILLPAY);trips=await dbAll(ST.TRIPS);wiseEx=await dbAll(ST.WISEEX);
   wiseSp=await dbAll(ST.WISESP);rates=await dbAll(ST.RATES);instalments=await dbAll(ST.INSTAL);
-  cashInHand=await dbAll(ST.CASH);settlements=await dbAll(ST.SETTLEMENTS);atmDrawals=await dbAll(ST.ATMDRAW);tripCosts=await dbAll(ST.TRIPCOSTS);
+  cashInHand=await dbAll(ST.CASH);settlements=await dbAll(ST.SETTLEMENTS);atmDrawals=await dbAll(ST.ATMDRAW);tripCosts=await dbAll(ST.TRIPCOSTS);incStreams=await dbAll(ST.INCSTREAMS);incPayments=await dbAll(ST.INCPAY);
   // Auto-detect active trip
   _detectActiveTrip();
   const cfgArr=await dbAll(ST.DASHCFG);
@@ -648,7 +672,7 @@ function closeFAB(){
 // ===== SHEET =====
 function openSheet(type,data=null){
   closeFAB();
-  const titles={transaction:'Add Transaction',transfer:'Transfer Funds','update-balance':'Update Balance','add-bill':'Add Bill','edit-bill':'Edit Bill','account-detail':data?.name||'Account','credit-detail':data?.name||'Credit Account','reconcile':'Reconcile','edit-payday':'Auto Transfers','wise-edit':`Update ${data?.currency||'Currency'}`,'sf-deposit':'Add to Fund','loan-detail':'Caravan Loan','property-detail':data?.name||'Property','new-payday':'New Payday','hist-payday':'Add Historical Payday','payday-detail':'Payday Record','add-currency':'Add Currency','add-rent':'Record Rent','rent-history':'Rent History','add-period':'Set Pay Period','tx-list':'All Transactions','fy-report':'Financial Year Report','pay-bill-now':'Pay Bill','dash-customise':'Customise Dashboard','add-auto-transfer':'Add Auto Transfer','edit-bill-dash':'Edit Bill','wise-exchange':'Currency Exchange','wise-spend':'Record Spending','edit-exchange':'Edit Exchange','edit-spend':'Edit Spending','add-trip':'New Trip','trip-detail':data?.name||'Trip','add-rate':'Add Interest Rate','credit-spend':'Record Spend','credit-repay':'Record Repayment','add-instalment':'Add Instalment Plan','atm-withdraw':'ATM Withdrawal','add-cash':'Add Cash on Hand','add-settlement':'Add Settlement','offset-settlement':'Offset Settlement','wise-transfer':'Transfer to Wise','amend-trip':'Edit Trip','add-trip-cost':'Add Trip Cost','edit-trip-cost':'Edit Trip Cost'};
+  const titles={transaction:'Add Transaction',transfer:'Transfer Funds','update-balance':'Update Balance','add-bill':'Add Bill','edit-bill':'Edit Bill','account-detail':data?.name||'Account','credit-detail':data?.name||'Credit Account','reconcile':'Reconcile','edit-payday':'Auto Transfers','wise-edit':`Update ${data?.currency||'Currency'}`,'sf-deposit':'Add to Fund','loan-detail':'Caravan Loan','property-detail':data?.name||'Property','new-payday':'New Payday','hist-payday':'Add Historical Payday','payday-detail':'Payday Record','add-currency':'Add Currency','add-rent':'Record Rent','rent-history':'Rent History','add-period':'Set Pay Period','tx-list':'All Transactions','fy-report':'Financial Year Report','pay-bill-now':'Pay Bill','dash-customise':'Customise Dashboard','add-auto-transfer':'Add Auto Transfer','edit-bill-dash':'Edit Bill','wise-exchange':'Currency Exchange','wise-spend':'Record Spending','edit-exchange':'Edit Exchange','edit-spend':'Edit Spending','add-trip':'New Trip','trip-detail':data?.name||'Trip','add-rate':'Add Interest Rate','credit-spend':'Record Spend','credit-repay':'Record Repayment','add-instalment':'Add Instalment Plan','atm-withdraw':'ATM Withdrawal','add-cash':'Add Cash on Hand','add-settlement':'Add Settlement','offset-settlement':'Offset Settlement','wise-transfer':'Transfer to Wise','amend-trip':'Edit Trip','add-trip-cost':'Add Trip Cost','edit-trip-cost':'Edit Trip Cost','inc-streams':'Income Streams','add-inc-stream':'Add Income Stream','edit-inc-stream':'Edit Income Stream','inc-stream-history':'Payment History'};
   document.getElementById('sh-title').textContent=titles[type]||type;
   document.getElementById('sh-body').innerHTML='';
   const map={
@@ -671,7 +695,9 @@ function openSheet(type,data=null){
     'atm-withdraw':renderATMWithdrawSheet,'add-cash':renderAddCashSheet,
     'add-settlement':()=>renderAddSettlementSheet(data),'offset-settlement':()=>renderOffsetSettlementSheet(data),
     'wise-transfer':()=>renderWiseTransferSheet(data),'amend-trip':()=>renderAmendTripSheet(data),
-    'add-trip-cost':()=>renderAddTripCostSheet(data),'edit-trip-cost':()=>renderEditTripCostSheet(data)
+    'add-trip-cost':()=>renderAddTripCostSheet(data),'edit-trip-cost':()=>renderEditTripCostSheet(data),
+    'inc-streams':renderIncStreamsSheet,'add-inc-stream':renderAddIncStreamSheet,'edit-inc-stream':()=>renderEditIncStreamSheet(data),
+    'inc-stream-history':()=>renderIncStreamHistorySheet(data)
   };
   if(map[type])map[type]();
   document.getElementById('overlay').classList.add('open');
@@ -815,6 +841,70 @@ async function renderDash(){
     </div>`:''}
 
 
+    <!-- INCOME STATEMENT (collapsible by month) -->
+    ${(()=>{
+      // Pull all income transactions, newest first
+      const incomeTxs=[...txs].filter(t=>t.type==='income').sort((a,b)=>b.date.localeCompare(a.date));
+      if(incomeTxs.length===0)return'';
+
+      // Group by YYYY-MM
+      const byMonth={};
+      incomeTxs.forEach(t=>{
+        const key=t.date.slice(0,7); // "2026-06"
+        if(!byMonth[key])byMonth[key]=[];
+        byMonth[key].push(t);
+      });
+
+      const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+      const currentMonthKey=todayStr().slice(0,7);
+
+      const monthLabel=key=>{
+        const d=new Date(key+'-01T00:00:00');
+        return d.toLocaleDateString('en-AU',{month:'long',year:'numeric'});
+      };
+
+      const monthRows=monthKeys.map(key=>{
+        const items=byMonth[key];
+        const total=items.reduce((s,t)=>s+t.amount,0);
+        const isCurrentMonth=key===currentMonthKey;
+        const rows=items.map(t=>`
+          <div style="display:flex;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border)">
+            <div style="font-size:0.75rem;font-family:var(--mono);color:var(--t3);width:52px;flex-shrink:0">${fmtDateShort(t.date)}</div>
+            <div style="flex:1;min-width:0;padding:0 10px">
+              <div style="font-size:0.86rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.description||t.category||'Income'}</div>
+              <div style="font-size:0.67rem;color:var(--t3);font-family:var(--mono)">${t.account}</div>
+            </div>
+            <div style="font-family:var(--mono);font-size:0.92rem;font-weight:700;color:var(--green);flex-shrink:0">+${fmt(t.amount)}</div>
+          </div>`).join('');
+
+        const totalRow=`<div style="display:flex;justify-content:space-between;padding:10px 14px;background:rgba(16,185,129,0.06);border-top:1px solid rgba(16,185,129,0.15)">
+          <span style="font-size:0.78rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:0.08em">${monthLabel(key)} Total</span>
+          <span style="font-family:var(--mono);font-size:0.88rem;font-weight:700;color:var(--green)">+${fmt(total)}</span>
+        </div>`;
+
+        return`<div class="bank-group ${isCurrentMonth?'open':''}" id="inc-month-${key}" style="margin-bottom:7px;border-radius:var(--r);overflow:hidden;border:1px solid rgba(255,255,255,0.055)">
+          <div class="bank-group-hdr" onclick="this.parentElement.classList.toggle('open')" style="padding:11px 14px">
+            <div class="bank-group-left">
+              <span style="font-size:0.88rem;font-weight:700">${monthLabel(key)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-family:var(--mono);font-size:0.84rem;font-weight:600;color:var(--green)">+${fmt(total)}</span>
+              <span class="bank-chevron">▾</span>
+            </div>
+          </div>
+          <div class="bank-group-body" style="padding:0">
+            ${rows}
+            ${totalRow}
+          </div>
+        </div>`;
+      }).join('');
+
+      return`<div style="margin-bottom:9px">
+        <div class="sh" style="margin-top:4px"><span class="sh-title">Income Statement</span></div>
+        ${monthRows}
+      </div>`;
+    })()}
+
     <!-- TRANSACTION HISTORY (collapsible) -->
     <div class="bank-group" id="dash-tx-group" style="margin-bottom:9px">
       <div class="bank-group-hdr" onclick="this.parentElement.classList.toggle('open')">
@@ -854,8 +944,7 @@ function renderBillDashItem(b,editMode){
       <div class="bill-days" style="color:${dayCol}">${days!==null?`${days}d`:'—'}</div>
     </div>
     ${!editMode?`<div style="width:100%;display:flex;gap:7px;margin-top:8px">
-      <button onclick="event.stopPropagation();openSheet('pay-bill-now',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--teal);color:#0A0E1A;border:none;border-radius:7px;font-size:0.75rem;font-weight:700;cursor:pointer;font-family:var(--mono)">Pay Now</button>
-      <button onclick="event.stopPropagation();openSheet('edit-bill-dash',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button>
+      <button onclick="event.stopPropagation();openSheet('edit-bill-dash',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="width:100%;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button>
     </div>`:''}
   </div>`;
 }
@@ -945,7 +1034,61 @@ async function renderPayday(){
   const totalPayT=payT.filter(t=>t.enabled).reduce((s,t)=>s+t.amount,0);
 
   el.innerHTML=`
-    <!-- AUTO TRANSFERS — collapsible, collapsed by default -->
+    <!-- RENT & INCOME RECEIVED — open by default, moved to top -->
+    <div class="bank-group open" id="rent-group">
+      <div class="bank-group-hdr" onclick="this.parentElement.classList.toggle('open')">
+        <div class="bank-group-left">
+          <span style="font-size:1rem">🏠</span>
+          <span class="bank-group-name">Rent & Income Received</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="bank-chevron">▾</span>
+        </div>
+      </div>
+      <div class="bank-group-body" style="padding:12px">
+        <!-- Griffin Rent -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:0.62rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:7px">Griffin Rent</div>
+          <div class="stat-card tap" onclick="openSheet('rent-history',{property:'Griffin'})" style="margin-bottom:0">
+            <div class="stat-lbl">Last recorded</div>
+            <div class="stat-val pos">${fmt(rents.filter(r=>r.property==='Griffin').sort((a,b)=>b.date.localeCompare(a.date))[0]?.amount||0)}</div>
+            <div style="font-size:0.68rem;color:var(--teal);margin-top:4px;font-family:var(--mono)">History & Delete ›</div>
+          </div>
+        </div>
+        <!-- Bowen Hills Rent -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:0.62rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:7px">Bowen Hills Rent</div>
+          <div class="stat-card tap" onclick="openSheet('rent-history',{property:'Bowen Hills'})" style="margin-bottom:0">
+            <div class="stat-lbl">Last recorded</div>
+            <div class="stat-val pos">${fmt(rents.filter(r=>r.property==='Bowen Hills').sort((a,b)=>b.date.localeCompare(a.date))[0]?.amount||0)}</div>
+            <div style="font-size:0.68rem;color:var(--teal);margin-top:4px;font-family:var(--mono)">History & Delete ›</div>
+          </div>
+        </div>
+        <!-- Income Streams -->
+        ${incStreams.length>0?`<div style="margin-bottom:10px">
+          <div style="font-size:0.62rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:7px">Other Income</div>
+          ${incStreams.filter(s=>s.enabled).map(s=>`
+            <div style="display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1px solid rgba(255,255,255,0.055);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:7px">
+              <div>
+                <div style="font-size:0.86rem;font-weight:600">${s.name}</div>
+                <div style="font-size:0.68rem;color:var(--t3);font-family:var(--mono);margin-top:2px">${s.freq} · → ${s.depositTo}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="font-family:var(--mono);font-size:0.95rem;font-weight:700;color:var(--green)">${fmt(s.amount)}</div>
+                <button onclick="recordIncomeStream(${s.id})" style="font-size:0.72rem;color:#0A0E1A;background:var(--green);border:none;border-radius:6px;padding:5px 9px;cursor:pointer;font-family:var(--mono);font-weight:700">+ Received</button>
+                <button onclick="openSheet('inc-stream-history',${JSON.stringify(s).replace(/"/g,'&quot;')})" style="font-size:0.72rem;color:var(--teal);background:none;border:1px solid var(--border-teal);border-radius:6px;padding:5px 9px;cursor:pointer;font-family:var(--mono)">History</button>
+                <button onclick="openSheet('edit-inc-stream',${JSON.stringify(s).replace(/"/g,'&quot;')})" style="font-size:0.72rem;color:var(--t2);background:var(--inp);border:1px solid var(--border);border-radius:6px;padding:5px 9px;cursor:pointer;font-family:var(--mono)">Edit</button>
+              </div>
+            </div>`).join('')}
+        </div>`:''}
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-s" style="flex:1" onclick="openSheet('add-rent',null)">+ Record Rent</button>
+          <button class="btn btn-s" style="flex:1" onclick="openSheet('add-inc-stream')">+ Add Income</button>
+        </div>
+      </div>
+    </div>
+
+        <!-- AUTO TRANSFERS — collapsible, collapsed by default -->
     <div class="bank-group" id="pt-group">
       <div class="bank-group-hdr" onclick="this.parentElement.classList.toggle('open')">
         <div class="bank-group-left">
@@ -974,34 +1117,7 @@ async function renderPayday(){
       </div>
     </div>
 
-    <!-- RENT RECEIVED -->
-    <div class="bank-group" id="rent-group" style="margin-top:9px">
-      <div class="bank-group-hdr" onclick="this.parentElement.classList.toggle('open')">
-        <div class="bank-group-left">
-          <span style="font-size:1rem">🏠</span>
-          <span class="bank-group-name">Rent Received</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="bank-group-total pos">${fmt((props[0]?.rentFn||1100)+(props[1]?.rentFn||750))}/fn</span>
-          <span class="bank-chevron">▾</span>
-        </div>
-      </div>
-      <div class="bank-group-body" style="padding:12px">
-        <div class="stat-row" style="margin-bottom:9px">
-          <div class="stat-card tap" onclick="openSheet('rent-history',{property:'Griffin'})">
-            <div class="stat-lbl">Griffin Rent</div>
-            <div class="stat-val pos">${fmt(props[0]?.rentFn||1100)}/fn</div>
-            <div style="font-size:0.68rem;color:var(--teal);margin-top:4px;font-family:var(--mono)">History ›</div>
-          </div>
-          <div class="stat-card tap" onclick="openSheet('rent-history',{property:'Bowen Hills'})">
-            <div class="stat-lbl">Bowen Hills Rent</div>
-            <div class="stat-val pos">${fmt(props[1]?.rentFn||750)}/fn</div>
-            <div style="font-size:0.68rem;color:var(--teal);margin-top:4px;font-family:var(--mono)">History ›</div>
-          </div>
-        </div>
-        <button class="btn btn-s" onclick="openSheet('add-rent',null)">+ Record Rent Payment</button>
-      </div>
-    </div>
+
 
     <!-- RECURRING BILLS — collapsible, collapsed by default -->
     <div class="bank-group" id="bills-group" style="margin-top:9px">
@@ -3054,6 +3170,169 @@ async function deleteTripCost(id){
   });
 }
 
+// ===== INCOME STREAMS =====
+function renderIncStreamsSheet(){
+  const accOpts=accs.filter(a=>a.isAsset&&a.type!=='mortgage').map(a=>`<option value="${a.name}">${a.name}</option>`).join('');
+  document.getElementById('sh-body').innerHTML=`
+    <div style="margin-bottom:13px;font-size:0.78rem;color:var(--t2)">Regular income sources outside of employment pay. Tap to record a payment or edit.</div>
+    ${incStreams.map(s=>`
+      <div style="background:var(--card);border:1px solid rgba(255,255,255,0.055);border-radius:var(--r);padding:13px 14px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+          <div>
+            <div style="font-size:0.9rem;font-weight:700">${s.name}</div>
+            <div style="font-size:0.7rem;color:var(--t3);font-family:var(--mono);margin-top:2px">${s.freq} · → ${s.depositTo}${!s.enabled?' · <span style="color:var(--amber)">Disabled</span>':''}</div>
+            ${s.notes?`<div style="font-size:0.7rem;color:var(--t3);margin-top:2px">${s.notes}</div>`:''}
+          </div>
+          <div style="font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--green)">${fmt(s.amount)}</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="recordIncomeStream(${s.id})" style="flex:1;padding:8px;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:var(--mono)">+ Record Payment</button>
+          <button onclick="openSheet('inc-stream-history',${JSON.stringify(s).replace(/"/g,'&quot;')})" style="padding:8px 12px;background:none;color:var(--teal);border:1px solid var(--border-teal);border-radius:8px;font-size:0.78rem;cursor:pointer;font-family:var(--mono)">History</button>
+          <button onclick="openSheet('edit-inc-stream',${JSON.stringify(s).replace(/"/g,'&quot;')})" style="padding:8px 12px;background:var(--inp);color:var(--t2);border:1px solid var(--border);border-radius:8px;font-size:0.78rem;cursor:pointer;font-family:var(--mono)">Edit</button>
+        </div>
+      </div>`).join('')}
+    <button class="btn btn-s" style="margin-top:6px" onclick="openSheet('add-inc-stream')">+ Add Income Stream</button>`;
+}
+
+async function recordIncomeStream(id){
+  const s=incStreams.find(x=>x.id===id);if(!s)return;
+  const acc=accs.find(a=>a.name===s.depositTo);
+  if(!acc){showToast('Deposit account not found','red');return}
+  acc.balance+=s.amount;
+  await dbPut(ST.ACC,acc);
+  const tx={type:'income',amount:s.amount,account:acc.name,description:`${s.name} payment`,date:todayStr(),category:'income'};
+  const savedTx=await dbPut(ST.TX,tx);txs.push(savedTx);
+  // Save to income payment history store
+  const pay={streamId:id,streamName:s.name,amount:s.amount,account:acc.name,date:todayStr()};
+  const savedPay=await dbPut(ST.INCPAY,pay);incPayments.push(savedPay);
+  closeSheet();showToast(`${fmt(s.amount)} deposited to ${acc.name} ✓`,'green');await renderView();
+}
+
+function renderAddIncStreamSheet(){
+  const accOpts=accs.filter(a=>a.isAsset&&a.type!=='mortgage').map(a=>`<option value="${a.name}" ${'Bowen Hills Transaction'===a.name?'selected':''}>${a.name}</option>`).join('');
+  document.getElementById('sh-body').innerHTML=`
+    <div class="fg"><label class="flabel">Income Name</label><input class="finput" id="is-name" placeholder="e.g. Car Park Rental"></div>
+    <div class="fg"><label class="flabel">Amount</label><input class="finput" id="is-amount" type="number" placeholder="0.00" inputmode="decimal" step="0.01"></div>
+    <div class="fg"><label class="flabel">Frequency</label>
+      <select class="fselect" id="is-freq">
+        <option value="weekly">Weekly</option>
+        <option value="fortnightly">Fortnightly</option>
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="yearly">Yearly</option>
+      </select>
+    </div>
+    <div class="fg"><label class="flabel">Deposit Into</label><select class="fselect" id="is-acc">${accOpts}</select></div>
+    <div class="fg"><label class="flabel">Notes (optional)</label><input class="finput" id="is-notes" placeholder="e.g. Unit 12 car park"></div>
+    <button class="btn btn-p" onclick="saveIncStream()">Add Income Stream</button>`;
+}
+async function saveIncStream(){
+  const name=document.getElementById('is-name')?.value?.trim();
+  const amount=parseFloat(document.getElementById('is-amount')?.value);
+  const freq=document.getElementById('is-freq')?.value;
+  const depositTo=document.getElementById('is-acc')?.value;
+  const notes=document.getElementById('is-notes')?.value||'';
+  if(!name){showToast('Enter a name','red');return}
+  if(!amount||isNaN(amount)||amount<=0){showToast('Enter valid amount','red');return}
+  const saved=await dbPut(ST.INCSTREAMS,{name,amount,freq,depositTo,notes,enabled:true});
+  incStreams.push(saved);
+  closeSheet();showToast(`${name} added ✓`,'green');
+}
+
+function renderEditIncStreamSheet(s){
+  if(!s)return;
+  const accOpts=accs.filter(a=>a.isAsset&&a.type!=='mortgage').map(a=>`<option value="${a.name}" ${a.name===s.depositTo?'selected':''}>${a.name}</option>`).join('');
+  document.getElementById('sh-body').innerHTML=`
+    <div class="fg"><label class="flabel">Income Name</label><input class="finput" id="eis-name" value="${s.name||''}"></div>
+    <div class="fg"><label class="flabel">Amount</label><input class="finput" id="eis-amount" type="number" value="${s.amount||''}" inputmode="decimal" step="0.01"></div>
+    <div class="fg"><label class="flabel">Frequency</label>
+      <select class="fselect" id="eis-freq">
+        <option value="weekly" ${s.freq==='weekly'?'selected':''}>Weekly</option>
+        <option value="fortnightly" ${s.freq==='fortnightly'?'selected':''}>Fortnightly</option>
+        <option value="monthly" ${s.freq==='monthly'?'selected':''}>Monthly</option>
+        <option value="quarterly" ${s.freq==='quarterly'?'selected':''}>Quarterly</option>
+        <option value="yearly" ${s.freq==='yearly'?'selected':''}>Yearly</option>
+      </select>
+    </div>
+    <div class="fg"><label class="flabel">Deposit Into</label><select class="fselect" id="eis-acc">${accOpts}</select></div>
+    <div class="fg"><label class="flabel">Enabled</label>
+      <label class="toggle" style="margin-top:4px"><input type="checkbox" id="eis-enabled" ${s.enabled?'checked':''}><span class="tslider"></span></label>
+    </div>
+    <div class="fg"><label class="flabel">Notes</label><input class="finput" id="eis-notes" value="${s.notes||''}" placeholder="Optional"></div>
+    <button class="btn btn-p" onclick="saveEditIncStream(${s.id})">Save Changes</button>
+    <button class="btn btn-d" style="margin-top:8px" onclick="deleteIncStream(${s.id})">Delete</button>`;
+}
+async function saveEditIncStream(id){
+  const s=incStreams.find(x=>x.id===id);if(!s)return;
+  s.name=document.getElementById('eis-name')?.value?.trim()||s.name;
+  s.amount=parseFloat(document.getElementById('eis-amount')?.value)||s.amount;
+  s.freq=document.getElementById('eis-freq')?.value;
+  s.depositTo=document.getElementById('eis-acc')?.value;
+  s.enabled=document.getElementById('eis-enabled')?.checked!==false;
+  s.notes=document.getElementById('eis-notes')?.value||'';
+  await dbPut(ST.INCSTREAMS,s);
+  const idx=incStreams.findIndex(x=>x.id===id);if(idx>=0)incStreams[idx]=s;
+  closeSheet();showToast('Updated ✓','green');
+}
+async function deleteIncStream(id){
+  showInlineConfirm('Delete this income stream? This cannot be undone.','Delete','red',async()=>{
+    await dbDel(ST.INCSTREAMS,id);incStreams=incStreams.filter(x=>x.id!==id);
+    closeSheet();showToast('Deleted','red');
+  });
+}
+
+function renderIncStreamHistorySheet(s){
+  if(!s)return;
+  const payments=incPayments.filter(p=>p.streamId===s.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const total=payments.reduce((sum,p)=>sum+p.amount,0);
+  document.getElementById('sh-body').innerHTML=`
+    <div style="background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.2);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:14px">
+      <div style="font-size:0.78rem;font-weight:700;color:var(--t1)">${s.name}</div>
+      <div style="font-size:0.7rem;color:var(--t3);font-family:var(--mono);margin-top:2px">${s.freq} · → ${s.depositTo}</div>
+    </div>
+    <button class="btn btn-p" style="margin-bottom:14px" onclick="recordIncomeStreamFromHistory(${s.id})">+ Record Payment</button>
+    ${payments.length===0
+      ?'<div class="empty"><div class="empty-ic">💵</div><div class="empty-txt">No payments recorded yet</div></div>'
+      :payments.map(p=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:0.86rem;font-weight:600">${fmtDate(p.date)}</div>
+            <div style="font-size:0.69rem;color:var(--t3);font-family:var(--mono);margin-top:2px">→ ${p.account}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="font-family:var(--mono);font-size:0.95rem;font-weight:700;color:var(--green)">+${fmt(p.amount)}</span>
+            <button onclick="deleteIncPayment(${p.id},${s.id})" style="font-size:0.68rem;color:var(--red);background:none;border:1px solid rgba(239,68,68,0.25);border-radius:6px;padding:4px 8px;cursor:pointer;font-family:var(--mono)">Delete</button>
+          </div>
+        </div>`).join('')}
+    ${payments.length>0?`<div style="display:flex;justify-content:space-between;padding:12px 0 2px;font-family:var(--mono);font-size:0.86rem"><span style="color:var(--t3)">Total received</span><strong class="pos">+${fmt(total)}</strong></div>`:''}`;
+}
+
+async function recordIncomeStreamFromHistory(id){
+  await recordIncomeStream(id);
+  // Re-open history sheet after recording
+  const s=incStreams.find(x=>x.id===id);
+  if(s)renderIncStreamHistorySheet(s);
+}
+
+async function deleteIncPayment(paymentId,streamId){
+  const p=incPayments.find(x=>x.id===paymentId);if(!p)return;
+  showInlineConfirm(
+    `Delete ${fmt(p.amount)} received on ${fmtDate(p.date)}? The balance will be reversed from ${p.account}.`,
+    'Delete Payment','red',
+    async()=>{
+      // Reverse account balance
+      const acc=accs.find(a=>a.name===p.account);
+      if(acc){acc.balance-=p.amount;await dbPut(ST.ACC,acc)}
+      await dbDel(ST.INCPAY,paymentId);
+      incPayments=incPayments.filter(x=>x.id!==paymentId);
+      // Re-render history sheet
+      const s=incStreams.find(x=>x.id===streamId);
+      if(s)renderIncStreamHistorySheet(s);
+      showToast('Payment deleted','red');
+    }
+  );
+}
+
 // More Tab
 function renderMore(){
   const upcomingBills=[...bills].filter(b=>b.dueDate).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).slice(0,3);
@@ -3061,7 +3340,7 @@ function renderMore(){
     const today=todayStr();const days=b.dueDate?daysBetween(today,b.dueDate):null;
     const cls=days===null?'':days<=7?'red-bill':days<=30?'amber-bill':'green-bill';
     const dayCol=days===null?'var(--t3)':days<=7?'var(--red)':days<=30?'var(--amber)':'var(--green)';
-    return`<div class="bill-item ${cls}" style="flex-wrap:wrap"><div class="bill-icon" style="background:rgba(0,212,180,0.06)">${emo(b.cat)}</div><div class="bill-info"><div class="bill-name">${b.name}</div><div class="bill-meta">Due ${b.dueDate?fmtDate(b.dueDate):'Not set'}${b.paidFrom?' · '+b.paidFrom:''}</div></div><div class="bill-right"><div class="bill-amt" style="color:${dayCol}">${fmt(b.amount)}</div><div class="bill-days" style="color:${dayCol}">${days!==null?days+'d':'—'}</div></div><div style="width:100%;display:flex;gap:7px;margin-top:8px"><button onclick="event.stopPropagation();openSheet('pay-bill-now',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--teal);color:#0A0E1A;border:none;border-radius:7px;font-size:0.75rem;font-weight:700;cursor:pointer;font-family:var(--mono)">Pay Now</button><button onclick="event.stopPropagation();openSheet('edit-bill',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button></div></div>`;
+    return`<div class="bill-item ${cls}" style="flex-wrap:wrap"><div class="bill-icon" style="background:rgba(0,212,180,0.06)">${emo(b.cat)}</div><div class="bill-info"><div class="bill-name">${b.name}</div><div class="bill-meta">Due ${b.dueDate?fmtDate(b.dueDate):'Not set'}${b.paidFrom?' · '+b.paidFrom:''}</div></div><div class="bill-right"><div class="bill-amt" style="color:${dayCol}">${fmt(b.amount)}</div><div class="bill-days" style="color:${dayCol}">${days!==null?days+'d':'—'}</div></div><div style="width:100%;margin-top:8px"><button onclick="event.stopPropagation();openSheet('edit-bill',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="width:100%;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button></div></div>`;
   };
   document.getElementById('view-more').innerHTML=`
     <div class="sh"><span class="sh-title">Bills & Subscriptions</span><button class="sh-btn" onclick="showBills()">All ›</button></div>
@@ -3073,6 +3352,7 @@ function renderMore(){
       <div class="more-item" onclick="showTimeline()"><div class="more-icon" style="background:rgba(59,130,246,0.1);color:var(--blue)">◎</div><div class="more-name">Timeline</div><div class="more-desc">Balance history</div></div>
       <div class="more-item" onclick="openSheet('tx-list')"><div class="more-icon" style="background:rgba(139,92,246,0.1);color:var(--purple)">↕</div><div class="more-name">Transactions</div><div class="more-desc">All history</div></div>
       <div class="more-item" onclick="openSheet('fy-report')"><div class="more-icon" style="background:rgba(236,72,153,0.1);color:var(--pink)">📊</div><div class="more-name">FY Report</div><div class="more-desc">Financial year</div></div>
+      <div class="more-item" onclick="openSheet('inc-streams')"><div class="more-icon" style="background:rgba(16,185,129,0.1);color:var(--green)">💵</div><div class="more-name">Income Streams</div><div class="more-desc">Car park & other income</div></div>
       <div class="more-item" onclick="exportBackup()"><div class="more-icon" style="background:rgba(0,212,180,0.08);color:var(--teal)">⬆️</div><div class="more-name">Export</div><div class="more-desc">JSON backup</div></div>
       <div class="more-item" onclick="importBackup()"><div class="more-icon" style="background:rgba(0,212,180,0.08);color:var(--teal)">⬇️</div><div class="more-name">Import</div><div class="more-desc">Restore backup</div></div>
     </div>
@@ -3086,7 +3366,7 @@ function showBills(){
     const today=todayStr();const days=b.dueDate?daysBetween(today,b.dueDate):null;
     const cls=days===null?'':days<=7?'red-bill':days<=30?'amber-bill':'green-bill';
     const dayCol=days===null?'var(--t3)':days<=7?'var(--red)':days<=30?'var(--amber)':'var(--green)';
-    return`<div class="bill-item ${cls}" style="flex-wrap:wrap"><div class="bill-icon" style="background:rgba(0,212,180,0.06)">${emo(b.cat)}</div><div class="bill-info"><div class="bill-name">${b.name}</div><div class="bill-meta">Due ${b.dueDate?fmtDate(b.dueDate):'Not set'}${b.paidFrom?' · '+b.paidFrom:''}</div></div><div class="bill-right"><div class="bill-amt" style="color:${dayCol}">${fmt(b.amount)}</div><div class="bill-days" style="color:${dayCol}">${days!==null?days+'d':'—'}</div></div><div style="width:100%;display:flex;gap:7px;margin-top:8px"><button onclick="event.stopPropagation();openSheet('pay-bill-now',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--teal);color:#0A0E1A;border:none;border-radius:7px;font-size:0.75rem;font-weight:700;cursor:pointer;font-family:var(--mono)">Pay Now</button><button onclick="event.stopPropagation();openSheet('edit-bill',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="flex:1;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button></div></div>`;
+    return`<div class="bill-item ${cls}" style="flex-wrap:wrap"><div class="bill-icon" style="background:rgba(0,212,180,0.06)">${emo(b.cat)}</div><div class="bill-info"><div class="bill-name">${b.name}</div><div class="bill-meta">Due ${b.dueDate?fmtDate(b.dueDate):'Not set'}${b.paidFrom?' · '+b.paidFrom:''}</div></div><div class="bill-right"><div class="bill-amt" style="color:${dayCol}">${fmt(b.amount)}</div><div class="bill-days" style="color:${dayCol}">${days!==null?days+'d':'—'}</div></div><div style="width:100%;margin-top:8px"><button onclick="event.stopPropagation();openSheet('edit-bill',${JSON.stringify(b).replace(/"/g,'&quot;')})" style="width:100%;padding:7px;background:var(--card);color:var(--t2);border:1px solid var(--border);border-radius:7px;font-size:0.75rem;cursor:pointer;font-family:var(--mono)">Edit</button></div></div>`;
   };
   setMoreContent(`<div class="sh"><span class="sh-title">All Bills & Subscriptions</span><button class="sh-btn" onclick="openSheet('add-bill')">+ Add</button></div>${sorted.map(b=>renderBillMoreItem(b)).join('')}`);
 }
@@ -3119,7 +3399,7 @@ function renderRentHistorySheet(data){
   document.getElementById('sh-body').innerHTML=`
     <div class="card green" style="margin-bottom:14px"><div class="clabel">Current Rate</div><div class="cval pos">${fmt(propData?.rentFn||0)}/fn</div><div class="csub">→ ${prop} Transaction</div></div>
     <button class="btn btn-s" style="margin-bottom:14px" onclick="openSheet('add-rent',null)">+ Record Payment</button>
-    ${propRents.length===0?'<div class="empty"><div class="empty-ic">🏠</div><div class="empty-txt">No rent recorded</div></div>':propRents.map(r=>`<div class="rent-hist-item"><div><div style="font-size:0.86rem;font-weight:600">${fmtDate(r.date)}</div>${r.note?'<div style="font-size:0.7rem;color:var(--t3)">'+r.note+'</div>':''}</div><div class="nw-val pos">${fmt(r.amount)}</div></div>`).join('')}
+    ${propRents.length===0?'<div class="empty"><div class="empty-ic">🏠</div><div class="empty-txt">No rent recorded</div></div>':propRents.map(r=>`<div class="rent-hist-item"><div><div style="font-size:0.86rem;font-weight:600">${fmtDate(r.date)}</div>${r.note?'<div style="font-size:0.7rem;color:var(--t3)">'+r.note+'</div>':''}</div><div style="display:flex;align-items:center;gap:9px"><div class="nw-val pos">${fmt(r.amount)}</div><button onclick="deleteRentRecord(${r.id},'${prop}')" style="font-size:0.68rem;color:var(--red);background:none;border:1px solid rgba(239,68,68,0.25);border-radius:6px;padding:4px 8px;cursor:pointer;font-family:var(--mono)">Delete</button></div></div>`).join('')}
     <div style="margin-top:14px;padding:11px 13px;background:var(--card);border-radius:var(--r-sm);display:flex;justify-content:space-between;font-family:var(--mono);font-size:0.86rem"><span>Total</span><strong class="pos">${fmt(propRents.reduce((s,r)=>s+r.amount,0))}</strong></div>`;
 }
 
@@ -3329,7 +3609,19 @@ function renderEditBillSheet(b){
     <div class="fg"><label class="flabel">Paid From Account</label><select class="fselect" id="eb-from">${aopts}</select></div>
     <div class="fg"><label class="flabel">Notes</label><input class="finput" id="eb-notes" value="${b.notes||''}" placeholder="Optional notes"></div>
     <button class="btn btn-p" onclick="saveEditBill(${b.id})">Save Changes</button>
-    <button class="btn btn-d" style="margin-top:8px" onclick="deleteBill(${b.id})">Delete Bill</button>`;
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:0.68rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:9px">Payment History</div>
+      ${billPayHistory.filter(h=>h.billId===b.id).sort((a,c)=>c.date.localeCompare(a.date)).slice(0,8).map(h=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div><div style="font-size:0.84rem;font-weight:500">${fmtDate(h.date)}</div><div style="font-size:0.68rem;color:var(--t3);font-family:var(--mono)">${h.account}${h.automatic?' · Auto':''}</div></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-family:var(--mono);font-size:0.88rem;font-weight:600;color:var(--red)">−${fmt(h.amount)}</span>
+            <button onclick="deleteBillPayment(${h.id},${b.id})" style="font-size:0.68rem;color:var(--red);background:none;border:1px solid rgba(239,68,68,0.25);border-radius:6px;padding:4px 7px;cursor:pointer;font-family:var(--mono)">Delete</button>
+          </div>
+        </div>`).join('')}
+      ${billPayHistory.filter(h=>h.billId===b.id).length===0?'<div style="font-size:0.8rem;color:var(--t3);padding:8px 0">No payment history</div>':''}
+    </div>
+    <button class="btn btn-d" style="margin-top:14px" onclick="deleteBill(${b.id})">Delete Bill</button>`;
 }
 async function saveEditBill(id){
   const name=document.getElementById('eb-name')?.value?.trim();
@@ -3356,7 +3648,32 @@ async function deleteBill(id){
     if(tab==='more')showBills();else await renderView();
   });
 }
+async function deleteBillPayment(paymentId,billId){
+  const h=billPayHistory.find(x=>x.id===paymentId);
+  if(!h)return;
+  showInlineConfirm(`Delete payment of ${fmt(h.amount)} on ${fmtDate(h.date)}? The account balance will be reversed.`,'Delete Payment','red',async()=>{
+    // Reverse the deduction from the account
+    const acc=accs.find(a=>a.name===h.account);
+    if(acc){acc.balance+=h.amount;await dbPut(ST.ACC,acc)}
+    await dbDel(ST.BILLPAY,paymentId);
+    billPayHistory=billPayHistory.filter(x=>x.id!==paymentId);
+    // Re-open the edit sheet for the same bill
+    const b=bills.find(x=>x.id===billId);
+    if(b)renderEditBillSheet(b);
+    showToast('Payment deleted','red');
+  });
+}
 
+async function deleteRentRecord(id,prop){
+  showInlineConfirm(`Delete this ${prop} rent record? The account balance will be reversed.`,'Delete Rent Record','red',async()=>{
+    const r=rents.find(x=>x.id===id);if(!r)return;
+    // Reverse the credit to the property account
+    const propAcc=accs.find(a=>a.name===`${prop} Transaction`);
+    if(propAcc){propAcc.balance-=r.amount;await dbPut(ST.ACC,propAcc)}
+    await dbDel(ST.RENTS,id);rents=rents.filter(x=>x.id!==id);
+    closeSheet();showToast('Rent record deleted','red');await renderView();
+  });
+}
 function renderAddRentSheet(){
   const propOpts=props.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
   document.getElementById('sh-body').innerHTML=`
